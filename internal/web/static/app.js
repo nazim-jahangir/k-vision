@@ -2187,12 +2187,15 @@ function openPanel(row, tab) {
   const kind = S.panel && S.panel.row === row ? S.panel.kind : S.kind;
   const isPod = kind.id === "pods";
   const hasData = kind.id === "secrets" || kind.id === "configmaps";
-  S.panel = { row, kind, tab: tab || (isPod && row.health && row.health !== "ok" ? "why" : hasData ? "data" : "yaml") };
+  const isVol = kind.id === "persistentvolumeclaims" || kind.id === "persistentvolumes";
+  S.panel = { row, kind, tab: tab || (isPod && row.health && row.health !== "ok" ? "why" : hasData ? "data"
+    : kind.id === "nodes" ? "pods" : isVol ? "links" : "yaml") };
   $("#panel").hidden = false;
   $("#panelKind").replaceChildren(ctxTag(row.context, true), ` ${kind.kind}${row.namespace ? " · " + row.namespace : ""}`);
   $("#panelTitle").textContent = row.name;
   const tabs = isPod ? [["why", "Why?"], ["yaml", "YAML"], ["logs", "Logs"], ["shell", "Shell"], ["files", "Files"]]
-    : kind.id === "nodes" ? [["yaml", "YAML"], ["shell", "Node shell"], ["files", "Files"]]
+    : kind.id === "nodes" ? [["pods", "Pods"], ["yaml", "YAML"], ["shell", "Node shell"], ["files", "Files"]]
+    : isVol ? [["links", kind.id === "persistentvolumes" ? "Claim & pods" : "Volume & pods"], ["yaml", "YAML"]]
     : hasData ? [["data", kind.id === "secrets" ? "Values" : "Data"], ["yaml", "YAML"]] : [["yaml", "YAML"]];
   if ((kind.verbs || []).includes("update")) tabs.push(["edit", "Edit"]);
   $("#panelTabs").replaceChildren(...tabs.map(([id, label]) => el("button", { role: "tab", type: "button",
@@ -2252,6 +2255,10 @@ async function showTab() {
           el("span", { class: "grow muted", text: "If someone changes this object before you apply, the apply is refused instead of overwriting their change." }),
           el("button", { type: "button", class: "primary", text: "Apply…", onclick: () => apply(row, ta.value) })),
         ta));
+    } else if (tab === "pods") {
+      await showNodePods(row, body);
+    } else if (tab === "links") {
+      await showVolumeLinks(row, kind, body);
     } else if (tab === "files") {
       await showFiles(row, kind, body);
     } else if (tab === "data") {
@@ -2289,6 +2296,106 @@ function yamlPre(text) {
     pre.append("\n");
   }
   return pre;
+}
+
+// ------------------------------------------------------------------ related objects
+// Node → its pods; PVC → its PV and the pods mounting it; PV → its claim and pods.
+// Every name is a link: it opens that object in its own list.
+
+async function showNodePods(row, body) {
+  const pods = await api("/api/node-pods?" + qs({ context: row.context, name: row.name }));
+  if (!S.panel || S.panel.row !== row || S.panel.tab !== "pods") return; // another object or tab was opened meanwhile
+  body.replaceChildren(el("div", { class: "rel" }, podSection(pods, row.context, "Pods on this node", "No pods are scheduled on this node.")));
+}
+
+async function showVolumeLinks(row, kind, body) {
+  const d = await api("/api/volume-links?" + qs({ context: row.context, kind: kind.id, namespace: row.namespace, name: row.name }));
+  if (!S.panel || S.panel.row !== row || S.panel.tab !== "links") return;
+  const link = (kid, ns, name, label) => el("a", { href: "#", text: label || name, title: `Open ${name}`,
+    onclick: (e) => { e.preventDefault(); goToObject(kid, row.context, ns, name); } });
+  const card = (pairs) => el("dl", { class: "rel-card" }, pairs.filter(Boolean).flatMap(([k, v]) => [el("dt", { text: k }), el("dd", {}, v)]));
+  const pill = (r) => el("span", { class: "pill " + (r.health || ""), text: r.status || "—" });
+  const secs = [];
+  if (kind.id === "persistentvolumeclaims") {
+    const v = d.volume, c = d.claim || { cells: {} };
+    secs.push(el("section", { class: "rel-sec" }, el("h3", { text: "Persistent volume" }),
+      v ? card([["Name", link("persistentvolumes", "", v.name)], ["Status", pill(v)], ["Capacity", v.cells.CAPACITY || "—"],
+          ["Access", v.cells.ACCESS || "—"], ["Reclaim", v.cells.RECLAIM || "—"], ["Class", v.cells.CLASS || "—"]])
+        : el("p", { class: "rel-none", text: d.volumeName
+          ? `Bound to ${d.volumeName}, which does not exist any more.`
+          : `Not bound to a volume yet (${c.status || "Pending"}). It binds when a pod using it is scheduled, or when the storage class provisions one.` })));
+  } else {
+    const c = d.claim;
+    secs.push(el("section", { class: "rel-sec" }, el("h3", { text: "Claim" }),
+      c ? card([["Name", link("persistentvolumeclaims", c.namespace, c.name)], ["Namespace", c.namespace], ["Status", pill(c)],
+          ["Capacity", c.cells.CAPACITY || "—"], ["Class", c.cells.CLASS || "—"]])
+        : el("p", { class: "rel-none", text: d.claimName
+          ? `Was claimed by ${d.claimNamespace}/${d.claimName}, which does not exist any more${row.status === "Released" ? " (Released: the data is kept until the volume is deleted)" : ""}.`
+          : "Not claimed by any PersistentVolumeClaim." })));
+  }
+  secs.push(podSection(d.pods || [], row.context, "Pods using it", "No pod mounts this claim right now."));
+  body.replaceChildren(el("div", { class: "rel" }, ...secs));
+}
+
+// A compact pod table: name (⚠ when it needs a look),
+// namespace, ready, restarts, CPU, memory, status, age. Click (or Enter) opens the pod.
+function podSection(pods, ctx, title, none) {
+  const sec = el("section", { class: "rel-sec" });
+  const bad = pods.filter((p) => p.health === "bad" || p.health === "warn").length;
+  const head = el("div", { class: "rel-head" }, el("h3", { text: title }),
+    el("span", { class: "grow muted", text: pods.length ? `${pods.length} ${pods.length === 1 ? "pod" : "pods"}${bad ? ` · ${bad} need a look` : ""}` : "" }));
+  if (!pods.length) { sec.append(head, el("p", { class: "rel-none", text: none })); return sec; }
+  const find = el("input", { id: "relPodFind", type: "search", placeholder: "Filter pods", "aria-label": "Filter pods", style: "width:180px" });
+  head.append(find);
+  const tbody = el("tbody");
+  // Status right after Ready: the drawer is narrow and these two say the most.
+  const cols = ["Name", "Namespace", "Ready", "Status", "Restarts", "CPU", "Memory", "Age"];
+  const colCls = { Namespace: "c-ns", Restarts: "c-restarts", Age: "c-age" };
+  const table = el("table", { class: "rel-table" }, el("thead", {}, el("tr", {}, cols.map((c) => el("th", { scope: "col", class: colCls[c] || "", text: c })))), tbody);
+  const draw = () => {
+    const f = find.value.trim().toLowerCase();
+    const rows = f ? pods.filter((p) => (p.namespace + "/" + p.name + " " + (p.status || "")).toLowerCase().includes(f)) : pods;
+    tbody.replaceChildren(...rows.map((p) => {
+      const c = p.cells || {}, open = () => goToObject("pods", ctx, p.namespace, p.name);
+      const warn = p.health === "bad" || p.health === "warn";
+      const restarts = el("td", { class: "mono c-restarts", text: c.RESTARTS || "0" });
+      if (parseInt(c.RESTARTS, 10) > 0) restarts.classList.add("hot");
+      return el("tr", { tabindex: "0", title: `Open ${p.name}`, onclick: open, onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); open(); } } },
+        el("td", { class: "name", title: `${p.namespace}/${p.name}` }, p.name,
+          warn ? el("span", { class: "rel-warn " + p.health, text: "⚠", title: p.status, "aria-label": "Needs a look: " + p.status }) : null),
+        el("td", { class: "c-ns", text: p.namespace }),
+        el("td", { class: "mono", text: c.READY || "—" }),
+        el("td", {}, el("span", { class: "pill " + (p.health || ""), text: p.status || "—", title: p.status || "" })),
+        restarts,
+        usageCell(c.CPU, "CPU"), usageCell(c.MEMORY, "MEMORY"),
+        el("td", { class: "mono c-age", text: p.age }));
+    }));
+    if (!rows.length) tbody.append(el("tr", {}, el("td", { colspan: cols.length, class: "rel-none", text: "No pod matches." })));
+  };
+  find.oninput = draw;
+  draw();
+  sec.append(head, el("div", { class: "rel-scroll" }, el("div", {}, table)));
+  return sec;
+}
+
+// Open one object in its list: the kind's section, narrowed to the name, row selected
+// and its details open. Namespaced objects outside the chosen namespaces add theirs.
+async function goToObject(kindQ, ctx, ns, name) {
+  const k = findKind(kindQ);
+  if (!k) return toast(`This cluster has no ${kindQ}.`, true);
+  if (!S.everywhere && ctx && ctx !== S.ctx) await switchContext(ctx, kindId(k));
+  if (k.namespaced && ns) {
+    const chosen = nsChosen();
+    if (S.nsNone || (chosen.length && !chosen.includes(ns))) {
+      S.nsNone = false; S.ns = ns; $("#ns").value = ns; store.set("ns", ns); syncNs();
+    }
+  }
+  await setKind(kindId(k));
+  setFilter(name);
+  const i = S.visible.findIndex((r) => r.name === name && (r.namespace || "") === (k.namespaced ? ns || "" : "") && (!S.everywhere || r.context === ctx));
+  if (i < 0) return toast(`${k.kind} ${ns && k.namespaced ? ns + "/" : ""}${name} is not in the list any more.`, true);
+  S.sel = i; render(); scrollSel();
+  openPanel(S.visible[i]);
 }
 
 async function showLogs(row, body) {
@@ -2634,6 +2741,8 @@ function wireKeys() {
     const typing = /INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.closest(".xterm");
     if (!$("#welcome").hidden) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); return openPalette(); }
+    // ⌘F / Ctrl+F: find in the YAML or editor open in the drawer; elsewhere the default.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f" && $("#dialog").hidden && KCFind.open()) { e.preventDefault(); return; }
     if (e.altKey && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w" && Tabs.count()) { e.preventDefault(); return Tabs.closeActive(); }
     if (!$("#dialog").hidden || !$("#palette").hidden) return;
     if (e.key === "Escape" && menuEl) return closeMenu();
@@ -2701,7 +2810,7 @@ window.kcMenu = (action) => {
   ({
     settings: showSettings, shortcuts: showShortcuts, palette: openPalette,
     create: () => openCreate(), home: showWelcome, clusters: showClusters, forwards: showForwards,
-    find: () => { if (!$("#filterArea").hidden) $("#filter").focus(); else openPalette(); },
+    find: () => { if (KCFind.open()) return; if (!$("#filterArea").hidden) $("#filter").focus(); else openPalette(); },
     overview: () => showOverview(), "map-cluster": () => showMap(null, "cluster"), "map-namespace": () => showMap(null, "namespace"),
     helm: () => showHelm("releases"), everywhere: () => setEverywhere(!S.everywhere),
     back: () => history.back(), forward: () => history.forward(),

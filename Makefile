@@ -13,6 +13,7 @@ test:
 	go test ./...
 	node --check internal/web/static/app.js
 	node --check internal/web/static/filter.js
+	node --check internal/web/static/find.js
 	node internal/web/jstest/filter_test.js
 
 install: build

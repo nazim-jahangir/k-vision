@@ -33,6 +33,8 @@ func columnsFor(k Kind) []string {
 		return []string{"SCHEDULE", "SUSPEND", "LAST"}
 	case "persistentvolumeclaims":
 		return []string{"VOLUME", "CAPACITY", "CLASS"}
+	case "persistentvolumes":
+		return []string{"CAPACITY", "ACCESS", "RECLAIM", "CLAIM", "CLASS"}
 	case "events", "events.k8s.io":
 		return []string{"TYPE", "REASON", "OBJECT", "MESSAGE"}
 	case "secrets":
@@ -136,6 +138,17 @@ func toRow(k Kind, u *unstructured.Unstructured) Row {
 		r.Cells["CLASS"] = str(o, "spec", "storageClassName")
 		r.Status = str(o, "status", "phase")
 		r.Health = map[string]Health{"Bound": Healthy, "Pending": Warning, "Lost": Failing}[r.Status]
+	case "persistentvolumes":
+		r.Cells["CAPACITY"] = str(o, "spec", "capacity", "storage")
+		r.Cells["ACCESS"] = accessModes(o)
+		r.Cells["RECLAIM"] = str(o, "spec", "persistentVolumeReclaimPolicy")
+		if n := str(o, "spec", "claimRef", "name"); n != "" {
+			r.Cells["CLAIM"] = str(o, "spec", "claimRef", "namespace") + "/" + n
+		}
+		r.Cells["CLASS"] = str(o, "spec", "storageClassName")
+		r.Status = str(o, "status", "phase")
+		// Released = its claim is gone and the data is still there (Retain): worth a look.
+		r.Health = map[string]Health{"Bound": Healthy, "Available": Healthy, "Released": Warning, "Failed": Failing, "Pending": Warning}[r.Status]
 	case "events", "events.k8s.io":
 		eventRow(&r, o)
 	case "secrets":
@@ -854,4 +867,18 @@ func labelText(l map[string]string) string {
 		parts = append(parts, fmt.Sprintf("+%d", len(keys)-3))
 	}
 	return strings.Join(parts, " ")
+}
+
+// accessModes as kubectl prints them: RWO, ROX, RWX, RWOP.
+func accessModes(o map[string]any) string {
+	modes, _, _ := unstructured.NestedStringSlice(o, "spec", "accessModes")
+	abbr := map[string]string{"ReadWriteOnce": "RWO", "ReadOnlyMany": "ROX", "ReadWriteMany": "RWX", "ReadWriteOncePod": "RWOP"}
+	out := make([]string, 0, len(modes))
+	for _, m := range modes {
+		if a, ok := abbr[m]; ok {
+			m = a
+		}
+		out = append(out, m)
+	}
+	return strings.Join(out, ",")
 }

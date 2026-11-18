@@ -293,6 +293,8 @@ func (s *server) routes() http.Handler {
 	api("GET /api/explain", s.explain)
 	api("GET /api/containers", s.containers)
 	api("GET /api/pods-of", s.podsOf)
+	api("GET /api/node-pods", s.nodePods)
+	api("GET /api/volume-links", s.volumeLinks)
 	api("POST /api/create", s.create)
 	api("GET /api/files", s.listFiles)
 	mux.HandleFunc("GET /api/files/download", s.guard(s.downloadFile))
@@ -1050,6 +1052,34 @@ func (s *server) podsOf(r *http.Request) (any, error) {
 	ctx, cancel := timeout(r, 20*time.Second)
 	defer cancel()
 	return c.PodsOf(ctx, k, q(r, "namespace"), q(r, "name"))
+}
+
+// nodePods: the pods on one node, for the node's Pods tab.
+func (s *server) nodePods(r *http.Request) (any, error) {
+	c, _, err := s.resolve(q(r, "context"), "")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := timeout(r, 30*time.Second)
+	defer cancel()
+	return c.PodsOnNode(ctx, q(r, "name"))
+}
+
+// volumeLinks: what a PVC or PV is bound to (its PV / claim) and the pods using it.
+func (s *server) volumeLinks(r *http.Request) (any, error) {
+	c, _, err := s.resolve(q(r, "context"), "")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := timeout(r, 30*time.Second)
+	defer cancel()
+	switch q(r, "kind") {
+	case "persistentvolumeclaims":
+		return c.ClaimLinks(ctx, q(r, "namespace"), q(r, "name"))
+	case "persistentvolumes":
+		return c.VolumeClaimLinks(ctx, q(r, "name"))
+	}
+	return nil, fmt.Errorf("volume links exist for persistentvolumeclaims and persistentvolumes, not %q", q(r, "kind"))
 }
 
 func (s *server) containers(r *http.Request) (any, error) {

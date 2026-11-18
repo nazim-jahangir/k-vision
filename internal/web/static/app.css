@@ -26,6 +26,7 @@
   --shadow: 0 1px 2px rgba(23, 32, 44, .06), 0 8px 24px rgba(23, 32, 44, .08);
   --overlay: rgba(15, 22, 32, .38);
   --mark: #ffe28a;
+  --mark-cur: #ff9b3d;
 
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -43,7 +44,7 @@
     --bad: #ff6b6b; --bad-bg: #3a1618; --idle: #93a0b2; --idle-bg: #1d242e;
     --prod: #ff8a80; --prod-bg: #2a1214; --prod-line: #5a2226;
     --code: #0c1016; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
-    --overlay: rgba(0,0,0,.55); --mark: #6b5310;
+    --overlay: rgba(0,0,0,.55); --mark: #6b5310; --mark-cur: #c0640f;
     color-scheme: dark;
   }
 }
@@ -56,7 +57,7 @@
   --bad: #ff6b6b; --bad-bg: #3a1618; --idle: #93a0b2; --idle-bg: #1d242e;
   --prod: #ff8a80; --prod-bg: #2a1214; --prod-line: #5a2226;
   --code: #0c1016; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.45);
-  --overlay: rgba(0,0,0,.55); --mark: #6b5310;
+  --overlay: rgba(0,0,0,.55); --mark: #6b5310; --mark-cur: #c0640f;
   color-scheme: dark;
 }
 
@@ -366,6 +367,54 @@ textarea.code { width: 100%; height: 100%; border: 0; resize: none; outline: non
 .pane pre { flex: 1; overflow: auto; white-space: pre-wrap; word-break: break-all; }
 .logs pre .lv-err { color: var(--bad); } .logs pre .lv-warn { color: var(--warn); }
 mark { background: var(--mark); color: inherit; border-radius: 2px; }
+
+/* Find in YAML (find.js): a bar under the tools; in the editor the matches sit on a
+   layer behind a transparent textarea, so both must share font, padding and wrapping. */
+.find-bar { display: flex; gap: 6px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: var(--fs-sm); }
+.find-bar input { flex: 1; min-width: 0; max-width: 320px; }
+.find-count { min-width: 76px; font-variant-numeric: tabular-nums; }
+.find-count.none { color: var(--bad); }
+.find-host { flex: 1; min-height: 0; position: relative; display: flex; }
+.find-host > textarea.code { position: relative; z-index: 1; flex: 1; }
+.find-host.on > textarea.code { background: transparent; }
+.find-hl { position: absolute; inset: 0; overflow: hidden; margin: 0; padding: 14px 16px; font: 12px/1.6 var(--font-mono);
+  white-space: pre; tab-size: 2; color: transparent; background: var(--code); pointer-events: none; }
+.find-hl mark { color: transparent; }
+.find-hl mark.cur, mark.find.cur { background: var(--mark-cur); }
+
+/* Drawer: pods on a node / using a volume, and the PVC <-> PV link. */
+/* Grid, not flex: WebKit (the macOS app) leaves a flex item's horizontal scrollbar out of its height, so the
+   scrollbar covered the pod rows. */
+.rel { display: grid; gap: 16px; padding: 14px 16px 18px; }
+.rel h3 { margin: 0; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.rel-sec { display: grid; gap: 8px; min-width: 0; }
+.rel-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rel-head .grow { flex: 1; }
+.rel-card { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunken); font-size: var(--fs-md); }
+.rel-card dt { color: var(--muted); }
+.rel-card dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rel-none { color: var(--muted); font-size: var(--fs-md); }
+.rel a, .rel-table td.name a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.rel a:hover, .rel a:focus-visible { text-decoration: underline; }
+.rel-scroll { min-width: 0; border: 1px solid var(--line); border-radius: var(--r); container-type: inline-size; overflow: hidden; }
+/* The scroller is a plain block inside it: block layout always counts the scrollbar in the height. */
+.rel-scroll > div { overflow-x: auto; }
+.rel-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rel-table th { position: sticky; top: 0; background: var(--surface); text-align: left; font-weight: 600; font-size: var(--fs-xs); letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rel-table th, .rel-table td { text-align: left; }
+.rel-table td { padding: 9px 12px; line-height: 1.4; border-bottom: 1px solid var(--line-soft); white-space: nowrap; vertical-align: middle; }
+.rel-table tr:last-child td { border-bottom: 0; }
+.rel-table tbody tr { cursor: pointer; }
+.rel-table tbody tr:hover { background: var(--row-hover); }
+.rel-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rel-table td.name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+.rel-table td.mono { font-family: var(--font-mono); font-size: 13px; }
+/* A narrow drawer drops the least useful columns instead of scrolling sideways. */
+@container (max-width: 760px) { .rel-table .c-age, .rel-table .c-restarts { display: none; } }
+@container (max-width: 560px) { .rel-table .c-ns { display: none; } }
+.rel-warn { margin-left: 6px; font-weight: 700; }
+.rel-warn.warn { color: var(--warn); } .rel-warn.bad { color: var(--bad); }
 .why { list-style: none; margin: 0; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .why li { padding: 12px 14px; border-radius: 9px; background: var(--sunken); border-left: 3px solid var(--warn); line-height: 1.5; }
 .why li.okay { border-left-color: var(--ok); }
