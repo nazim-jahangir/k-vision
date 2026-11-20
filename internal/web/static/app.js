@@ -531,6 +531,7 @@ function openCreate(forKind) {
   $("#panel").hidden = false;
   $("#panelKind").replaceChildren(ctxTag(target, true), " Create");
   $("#panelTitle").textContent = kind ? `New ${kind.kind}` : "New resource";
+  hideOwners();
   $("#panelTabs").replaceChildren();
   $("#panelActions").replaceChildren();
   const ta = el("textarea", { class: "code", spellcheck: "false", id: "createYaml", "aria-label": "YAML to create" });
@@ -1141,7 +1142,7 @@ async function openHelm(row, tab, revision) {
   if (S.helm === "charts") {
     const c = row.helm;
     $("#panelKind").replaceChildren(ctxTag(row.context, true), " Helm chart");
-    $("#panelTitle").textContent = c.name;
+    $("#panelTitle").textContent = c.name; hideOwners();
     $("#panelTabs").replaceChildren();
     $("#panelBody").replaceChildren(el("div", { class: "kv" },
       c.description ? el("p", { class: "muted", text: c.description }) : null,
@@ -1158,7 +1159,7 @@ async function openHelm(row, tab, revision) {
   const r = row.helm;
   tab = tab || "values";
   $("#panelKind").replaceChildren(ctxTag(row.context, true), ` Helm release · ${r.namespace}`);
-  $("#panelTitle").textContent = r.name;
+  $("#panelTitle").textContent = r.name; hideOwners();
   const tabs = [["values", "Values"], ["all", "All values"], ["manifest", "Manifest"], ["notes", "Notes"], ["history", "History"]];
   $("#panelTabs").replaceChildren(...tabs.map(([id, label]) => el("button", { role: "tab", type: "button",
     "aria-selected": String(tab === id), text: label, onclick: () => openHelm(row, id, revision) })));
@@ -1526,7 +1527,7 @@ function showClusters() {
   S.panel = null;
   $("#panel").hidden = false;
   $("#panelKind").textContent = "Kubeconfig";
-  $("#panelTitle").textContent = "Clusters";
+  $("#panelTitle").textContent = "Clusters"; hideOwners();
   $("#panelTabs").replaceChildren();
   $("#panelActions").replaceChildren();
   const row = (c, hidden) => el("li", { oncontextmenu: (e) => clusterMenu(e, c.name), class: hidden ? "is-hidden" : "" },
@@ -2193,6 +2194,7 @@ function openPanel(row, tab) {
   $("#panel").hidden = false;
   $("#panelKind").replaceChildren(ctxTag(row.context, true), ` ${kind.kind}${row.namespace ? " · " + row.namespace : ""}`);
   $("#panelTitle").textContent = row.name;
+  showOwners(row, kind);
   const tabs = isPod ? [["why", "Why?"], ["yaml", "YAML"], ["logs", "Logs"], ["shell", "Shell"], ["files", "Files"]]
     : kind.id === "nodes" ? [["pods", "Pods"], ["yaml", "YAML"], ["shell", "Node shell"], ["files", "Files"]]
     : isVol ? [["links", kind.id === "persistentvolumes" ? "Claim & pods" : "Volume & pods"], ["yaml", "YAML"]]
@@ -2204,7 +2206,7 @@ function openPanel(row, tab) {
   showTab();
 }
 
-function closePanel() { stopStreams(); S.panel = null; $("#panel").hidden = true; }
+function closePanel() { stopStreams(); S.panel = null; $("#panel").hidden = true; hideOwners(); }
 
 logSock = null; shellSock = null; term = null; termCleanup = null;
 function stopStreams() {
@@ -2296,6 +2298,47 @@ function yamlPre(text) {
     pre.append("\n");
   }
   return pre;
+}
+
+// ------------------------------------------------------------------ owners
+// The header line under the object's name: who created it, up the controller chain
+// (Pod -> ReplicaSet -> Deployment, Pod -> StatefulSet, Pod -> Job -> CronJob). Every
+// step opens that object in its own list. Loaded once per object, not per tab.
+var ownerFor = null;
+function hideOwners() { ownerFor = null; const b = $("#panelOwner"); b.hidden = true; b.replaceChildren(); }
+async function showOwners(row, kind) {
+  if (ownerFor === row) return;
+  ownerFor = row;
+  const box = $("#panelOwner");
+  box.hidden = true; box.replaceChildren();
+  let chain;
+  try {
+    chain = await api("/api/owners?" + qs({ context: row.context, kind: kind.id, namespace: row.namespace, name: row.name }));
+  } catch (_) { return; } // a missing owner line is not worth an error in the header
+  if (ownerFor !== row) return; // another object was opened meanwhile
+  if (!chain.length) {
+    // Worth saying only for pods: a pod nothing owns is not recreated when it is deleted.
+    if (kind.id !== "pods") return;
+    box.replaceChildren(el("span", { class: "po-label", text: "Owned by" }),
+      el("span", { class: "po-none", text: "nothing (a bare pod: deleting it does not bring it back)" }));
+    box.hidden = false;
+    return;
+  }
+  const parts = [el("span", { class: "po-label", text: "Owned by" })];
+  chain.forEach((o, i) => {
+    if (i) parts.push(el("span", { class: "po-arrow", "aria-hidden": "true", text: "→" }));
+    const label = [el("span", { class: "po-kind", text: o.kind }), " ", o.name];
+    if (o.missing || o.error || !o.row) {
+      parts.push(el("span", { class: "po-item gone", title: o.error || `${o.kind} ${o.name} no longer exists`, "aria-label": `${o.kind} ${o.name} (gone)` },
+        ...label, el("span", { class: "po-note", text: o.missing ? " (deleted)" : " (not readable)" })));
+      return;
+    }
+    const health = o.row.health ? el("span", { class: "po-dot " + o.row.health, title: o.row.status || o.row.health, "aria-hidden": "true" }) : null;
+    parts.push(el("a", { href: "#", class: "po-item", title: `Open ${o.kind} ${o.name}${o.row.status ? " · " + o.row.status : ""}`,
+      onclick: (e) => { e.preventDefault(); goToObject(o.kindId, row.context, o.namespace, o.name); } }, health, ...label));
+  });
+  box.replaceChildren(...parts);
+  box.hidden = false;
 }
 
 // ------------------------------------------------------------------ related objects
@@ -2654,7 +2697,7 @@ async function showForwards() {
   S.panel = null;
   $("#panel").hidden = false;
   $("#panelKind").textContent = "Local";
-  $("#panelTitle").textContent = "Port Forwarding";
+  $("#panelTitle").textContent = "Port Forwarding"; hideOwners();
   $("#panelTabs").replaceChildren();
   $("#panelActions").replaceChildren();
   const b = $("#panelBody");

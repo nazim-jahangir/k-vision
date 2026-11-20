@@ -295,6 +295,7 @@ func (s *server) routes() http.Handler {
 	api("GET /api/pods-of", s.podsOf)
 	api("GET /api/node-pods", s.nodePods)
 	api("GET /api/volume-links", s.volumeLinks)
+	api("GET /api/owners", s.owners)
 	api("POST /api/create", s.create)
 	api("GET /api/files", s.listFiles)
 	mux.HandleFunc("GET /api/files/download", s.guard(s.downloadFile))
@@ -1063,6 +1064,17 @@ func (s *server) nodePods(r *http.Request) (any, error) {
 	ctx, cancel := timeout(r, 30*time.Second)
 	defer cancel()
 	return c.PodsOnNode(ctx, q(r, "name"))
+}
+
+// owners: the object's controller chain upward (Pod -> ReplicaSet -> Deployment, ...).
+func (s *server) owners(r *http.Request) (any, error) {
+	c, k, err := s.resolve(q(r, "context"), q(r, "kind"))
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := timeout(r, 20*time.Second)
+	defer cancel()
+	return c.OwnerChain(ctx, k, q(r, "namespace"), q(r, "name"))
 }
 
 // volumeLinks: what a PVC or PV is bound to (its PV / claim) and the pods using it.
