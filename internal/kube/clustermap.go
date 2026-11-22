@@ -31,7 +31,8 @@ type ClusterMap struct {
 
 type MapPool struct {
 	Name     string    `json:"name"`
-	Source   string    `json:"source"` // "karpenter", "eks", or "" for unlabelled nodes
+	Source   string    `json:"source"`          // "karpenter", "eks", "gke", "gke-nap", "aks", or "" for unlabelled nodes
+	Class    string    `json:"class,omitempty"` // GKE ComputeClass the pool's nodes were created for
 	Nodes    []MapNode `json:"nodes"`
 	CPUReq   int64     `json:"cpuReq"`   // millicores requested by pods on the pool
 	CPUAlloc int64     `json:"cpuAlloc"` // millicores allocatable on the pool
@@ -77,10 +78,20 @@ var systemNS = map[string]bool{"kube-system": true, "kube-public": true, "kube-n
 	"cert-manager": true, "external-dns": true, "monitoring": true, "argocd": true, "crossplane-system": true,
 	"infra": true, "keda": true, "kyverno": true, "amazon-cloudwatch": true, "aws-observability": true, "default": true}
 
-// poolOf names the pool a node belongs to, preferring Karpenter, then EKS node groups.
+// poolOf names the pool a node belongs to, preferring Karpenter, then the cloud's own
+// node pools: EKS node groups, GKE node pools (NAP-created ones are "nap-…"), AKS agent pools.
 func poolOf(labels map[string]string) (string, string) {
 	if p := labels["karpenter.sh/nodepool"]; p != "" {
 		return p, "karpenter"
+	}
+	if p := labels["cloud.google.com/gke-nodepool"]; p != "" {
+		if strings.HasPrefix(p, "nap-") {
+			return p, "gke-nap"
+		}
+		return p, "gke"
+	}
+	if p := labels["kubernetes.azure.com/agentpool"]; p != "" {
+		return p, "aks"
 	}
 	if p := labels["eks.amazonaws.com/nodegroup"]; p != "" {
 		return p, "eks"
@@ -92,6 +103,13 @@ func poolOf(labels map[string]string) (string, string) {
 		return "fargate", "eks"
 	}
 	return "other nodes", ""
+}
+
+// isSpot reports a spot/preemptible node on Karpenter, EKS, GKE or AKS.
+func isSpot(labels map[string]string) bool {
+	return labels["karpenter.sh/capacity-type"] == "spot" || labels["eks.amazonaws.com/capacityType"] == "SPOT" ||
+		labels["cloud.google.com/gke-spot"] == "true" || labels["cloud.google.com/gke-preemptible"] == "true" ||
+		labels["kubernetes.azure.com/scalesetpriority"] == "spot"
 }
 
 // ClusterMap builds the cluster overview from nodes, pods and a few counts.
@@ -171,6 +189,9 @@ func (c *Cluster) ClusterMap(ctx context.Context) (*ClusterMap, error) {
 			p = &MapPool{Name: name, Source: src}
 			pools[name] = p
 		}
+		if c := n.Labels["cloud.google.com/compute-class"]; c != "" {
+			p.Class = c
+		}
 		ready := false
 		for _, cond := range n.Status.Conditions {
 			if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
@@ -178,7 +199,7 @@ func (c *Cluster) ClusterMap(ctx context.Context) (*ClusterMap, error) {
 			}
 		}
 		mn := MapNode{Name: n.Name, Type: n.Labels["node.kubernetes.io/instance-type"], Zone: n.Labels["topology.kubernetes.io/zone"],
-			Spot:   n.Labels["karpenter.sh/capacity-type"] == "spot" || n.Labels["eks.amazonaws.com/capacityType"] == "SPOT",
+			Spot:   isSpot(n.Labels),
 			Health: Healthy, Status: "Ready"}
 		switch {
 		case !ready:

@@ -94,7 +94,8 @@ const NAV = [
     ["scaledjobs.keda.sh", "ScaledJobs"], ["triggerauthentications.keda.sh", "TriggerAuthentications"],
     ["clustertriggerauthentications.keda.sh", "ClusterTriggerAuthentications"]]],
   ["Node Autoscaling", "⬡", [["nodepools.karpenter.sh", "NodePools"], ["ec2nodeclasses.karpenter.k8s.aws", "EC2NodeClasses"],
-    ["nodeclaims.karpenter.sh", "NodeClaims"], ["nodeoverlays.karpenter.sh", "NodeOverlays"]]],
+    ["nodeclaims.karpenter.sh", "NodeClaims"], ["nodeoverlays.karpenter.sh", "NodeOverlays"],
+    ["computeclasses.cloud.google.com", "ComputeClasses"]]],
 ];
 
 // Which sections are open, remembered. Default: the cluster list, Workloads and
