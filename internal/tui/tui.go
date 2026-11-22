@@ -791,6 +791,15 @@ func (m *Model) command(line string) tea.Cmd {
 		return m.warningsCmd(args)
 	case "topology", "topo", "map":
 		return m.topologyCmd(args)
+	case "nodepools", "nodepool":
+		// Only Karpenter has NodePool objects. GKE (NAP included), AKS and EKS pools exist
+		// in the cluster as node labels, and Cluster Topology is where those are shown.
+		if m.cluster == nil {
+			return nil
+		}
+		if _, err := m.cluster.ResolveKind("nodepools.karpenter.sh"); err != nil {
+			return m.topologyCmd(nil)
+		}
 	case "create", "new":
 		return m.createCmd(args)
 	case "cp", "copy":

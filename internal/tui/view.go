@@ -343,6 +343,22 @@ func (m *Model) tableView(h int) string {
 	for _, w := range widths {
 		total += w + 2
 	}
+	// On nodes, CLASS and SPOT are extras: when the table is too wide they go
+	// before any other column is cut.
+	if nodes := m.kind.ID() == "nodes"; nodes && total > m.width {
+		keep := make([]int, 0, len(cols))
+		for i, c := range cols {
+			if c == "CLASS" || c == "SPOT" {
+				total -= widths[i] + 2
+				continue
+			}
+			keep = append(keep, i)
+		}
+		cols, widths = pick(cols, keep), pick(widths, keep)
+		for i := range cells {
+			cells[i] = pick(cells[i], keep)
+		}
+	}
 	for total > m.width && total > 0 {
 		wi := 0
 		for i := range widths {
@@ -361,6 +377,15 @@ func (m *Model) tableView(h int) string {
 	for i, line := range cells {
 		r := m.rows[m.visible[m.offset+i]]
 		_, isMarked := m.marked[markKey(r)]
+		// A node's name ends in what tells it from its neighbours (the pool comes
+		// first on GKE and AKS), so a name that does not fit is cut in the middle.
+		if ni := nameCol(cols); ni >= 0 && m.kind.ID() == "nodes" {
+			w := widths[ni]
+			if isMarked && ni == 0 {
+				w -= 2
+			}
+			line[ni] = truncateMiddle(line[ni], w)
+		}
 		if isMarked {
 			line[0] = stCmd.Render("✓ ") + line[0]
 		}
@@ -461,6 +486,38 @@ func pad(cells []string, widths []int) string {
 		}
 	}
 	return b.String()
+}
+
+// pick returns the elements of s at the given indexes.
+func pick[T any](s []T, idx []int) []T {
+	out := make([]T, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, s[i])
+	}
+	return out
+}
+
+func nameCol(cols []string) int {
+	for i, c := range cols {
+		if c == "NAME" {
+			return i
+		}
+	}
+	return -1
+}
+
+// truncateMiddle shortens plain text to w cells keeping both ends: "gke-prod-…a1b2c3d4-x9zq".
+func truncateMiddle(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w < 5 {
+		return truncate(s, w)
+	}
+	head := (w - 1) / 2
+	tail := w - 1 - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
 
 func padTo(s string, w int) string {

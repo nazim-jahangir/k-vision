@@ -25,7 +25,7 @@ var Commands = []Command{
 	{"deploy", []string{"deployments"}, "[filter]", "List deployments", ":deploy !ok"},
 	{"nodes", []string{"no"}, "[filter]", "List nodes", ":nodes status:schedulingdisabled"},
 	{"app", []string{"applications"}, "[filter]", "ArgoCD applications", ":app sync:outofsync"},
-	{"nodepools", nil, "", "Karpenter NodePools (GKE/AKS pools: :topology or :nodes)", ":nodepools"},
+	{"nodepools", nil, "", "Node pools: Karpenter NodePools, or GKE (incl. NAP), AKS and EKS pools", ":nodepools"},
 	{"computeclasses", nil, "", "GKE ComputeClasses: the rules NAP builds node pools from", ":computeclasses"},
 	{"events", []string{"ev"}, "[filter]", "Events, newest problems first", ":events type:warning age<1h"},
 	{"<any kind>", nil, "[filter]", "Any resource type or CRD by name, short name or kind", ":scaledobjects"},
