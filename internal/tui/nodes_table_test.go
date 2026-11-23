@@ -44,6 +44,21 @@ func TestNodesTableNarrow(t *testing.T) {
 		}
 	}
 
+	// A little too narrow: CLASS goes, SPOT still fits and stays.
+	m.width = 155
+	mid := stripANSI(m.tableView(10))
+	if strings.Contains(mid, "CLASS") || !strings.Contains(mid, "SPOT") || !strings.Contains(mid, "gke-prod-nap-n2-standard-8-sp-a1b2c3d4-x9zq") {
+		t.Errorf("at 155 columns CLASS alone should be dropped and names stay whole:\n%s", mid)
+	}
+
+	// Another kind is left alone: its table has no optional columns and names are cut at the end.
+	pods := &Model{kind: kube.Kind{Name: "pods", Kind: "Pod", Namespaced: true}, cols: []string{"CLASS", "SPOT"}, width: 40,
+		rows: []kube.ClusterRow{{Row: kube.Row{Namespace: "shop", Name: "a-pod-with-a-very-long-name-that-cannot-fit-x9zq", Age: "2d", Status: "Running",
+			Cells: map[string]string{"CLASS": "c", "SPOT": "s"}}}}, visible: []int{0}}
+	if out := stripANSI(pods.tableView(10)); !strings.Contains(out, "CLASS") || !strings.Contains(out, "SPOT") || strings.Contains(out, "x9zq") {
+		t.Errorf("pods table must keep its columns and cut names at the end:\n%s", out)
+	}
+
 	m.width = 110
 	narrow := stripANSI(m.tableView(10))
 	for _, gone := range []string{"CLASS", "SPOT", "my-class"} {

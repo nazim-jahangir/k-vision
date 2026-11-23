@@ -756,7 +756,7 @@ async function showClusterMap(box) {
     if (!nss.length && !cm.pools.length) return canvas.replaceChildren(el("div", { class: "empty" }, el("strong", { text: "Nothing to map" }), "No nodes or pods were readable."));
     KCGraph.renderCluster(canvas, cm, { showSystem,
       onNamespace: (n) => showMap(n),
-      onPool: (p) => { setKind("nodes"); setTimeout(() => setFilter(p.source === "karpenter" ? "karpenter.sh/nodepool=" + p.name : p.name), 300); } });
+      onPool: (p) => { setKind("nodes"); setTimeout(() => setFilter(p.selector || p.name), 300); } });
   };
   draw();
 }

@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -791,15 +792,6 @@ func (m *Model) command(line string) tea.Cmd {
 		return m.warningsCmd(args)
 	case "topology", "topo", "map":
 		return m.topologyCmd(args)
-	case "nodepools", "nodepool":
-		// Only Karpenter has NodePool objects. GKE (NAP included), AKS and EKS pools exist
-		// in the cluster as node labels, and Cluster Topology is where those are shown.
-		if m.cluster == nil {
-			return nil
-		}
-		if _, err := m.cluster.ResolveKind("nodepools.karpenter.sh"); err != nil {
-			return m.topologyCmd(nil)
-		}
 	case "create", "new":
 		return m.createCmd(args)
 	case "cp", "copy":
@@ -833,6 +825,11 @@ func (m *Model) command(line string) tea.Cmd {
 	}
 	k, err := m.cluster.ResolveKind(cmd)
 	if err != nil {
+		// GKE, AKS and EKS node pools are not objects in the cluster, only node labels:
+		// where no resource type is called nodepools, Cluster Topology is where they are.
+		if errors.Is(err, kube.ErrUnknownKind) && (cmd == "nodepools" || cmd == "nodepool") {
+			return m.topologyCmd(nil)
+		}
 		m.setErr(err)
 		return nil
 	}

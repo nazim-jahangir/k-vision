@@ -363,7 +363,9 @@ func nodeRow(r *Row, o map[string]any) {
 	if p, src := poolOf(r.Labels); src != "" {
 		r.Cells["NODEPOOL"] = p
 	}
-	r.Cells["CLASS"] = r.Labels["cloud.google.com/compute-class"]
+	if c := r.Labels["cloud.google.com/compute-class"]; c != "" {
+		r.Cells["CLASS"] = c
+	}
 	if isSpot(r.Labels) {
 		r.Cells["SPOT"] = "spot"
 	}

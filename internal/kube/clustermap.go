@@ -31,8 +31,9 @@ type ClusterMap struct {
 
 type MapPool struct {
 	Name     string    `json:"name"`
-	Source   string    `json:"source"`          // "karpenter", "eks", "gke", "gke-nap", "aks", or "" for unlabelled nodes
-	Class    string    `json:"class,omitempty"` // GKE ComputeClass the pool's nodes were created for
+	Source   string    `json:"source"`             // "karpenter", "eks", "gke", "gke-nap", "aks", or "" for unlabelled nodes
+	Class    string    `json:"class,omitempty"`    // GKE ComputeClass the pool's nodes were created for
+	Selector string    `json:"selector,omitempty"` // node label that picks exactly this pool's nodes, "key=value"
 	Nodes    []MapNode `json:"nodes"`
 	CPUReq   int64     `json:"cpuReq"`   // millicores requested by pods on the pool
 	CPUAlloc int64     `json:"cpuAlloc"` // millicores allocatable on the pool
@@ -79,30 +80,37 @@ var systemNS = map[string]bool{"kube-system": true, "kube-public": true, "kube-n
 	"infra": true, "keda": true, "kyverno": true, "amazon-cloudwatch": true, "aws-observability": true, "default": true}
 
 // poolOf names the pool a node belongs to, preferring Karpenter, then the cloud's own
-// node pools: EKS node groups, GKE node pools (NAP-created ones are "nap-…"), AKS agent pools.
+// node pools: EKS node groups, GKE node pools, AKS agent pools.
 func poolOf(labels map[string]string) (string, string) {
-	if p := labels["karpenter.sh/nodepool"]; p != "" {
-		return p, "karpenter"
-	}
-	if p := labels["cloud.google.com/gke-nodepool"]; p != "" {
-		if strings.HasPrefix(p, "nap-") {
-			return p, "gke-nap"
+	name, src, _ := poolLabel(labels)
+	return name, src
+}
+
+// poolLabel is poolOf plus the node label that says so, as "key=value": the exact
+// filter for the pool's nodes. It is "" for nodes that belong to no pool.
+func poolLabel(labels map[string]string) (name, source, selector string) {
+	for _, l := range []struct{ key, source string }{
+		{"karpenter.sh/nodepool", "karpenter"},
+		{"cloud.google.com/gke-nodepool", "gke"},
+		{"kubernetes.azure.com/agentpool", "aks"},
+		{"eks.amazonaws.com/nodegroup", "eks"},
+		{"alpha.eksctl.io/nodegroup-name", "eks"},
+	} {
+		p := labels[l.key]
+		if p == "" {
+			continue
 		}
-		return p, "gke"
-	}
-	if p := labels["kubernetes.azure.com/agentpool"]; p != "" {
-		return p, "aks"
-	}
-	if p := labels["eks.amazonaws.com/nodegroup"]; p != "" {
-		return p, "eks"
-	}
-	if p := labels["alpha.eksctl.io/nodegroup-name"]; p != "" {
-		return p, "eks"
+		src := l.source
+		// GKE has no label for "created by node auto-provisioning"; NAP names its pools nap-….
+		if src == "gke" && strings.HasPrefix(p, "nap-") {
+			src = "gke-nap"
+		}
+		return p, src, l.key + "=" + p
 	}
 	if labels["eks.amazonaws.com/compute-type"] == "fargate" {
-		return "fargate", "eks"
+		return "fargate", "eks", "eks.amazonaws.com/compute-type=fargate"
 	}
-	return "other nodes", ""
+	return "other nodes", "", ""
 }
 
 // isSpot reports a spot/preemptible node on Karpenter, EKS, GKE or AKS.
@@ -178,16 +186,24 @@ func (c *Cluster) ClusterMap(ctx context.Context) (*ClusterMap, error) {
 	wg.Wait()
 
 	// ---- pools and nodes
-	pools := map[string]*MapPool{}
+	pools := map[string]*MapPool{} // by the name shown
+	type poolKey struct{ name, source string }
+	bySource := map[poolKey]*MapPool{}
 	nodePool := map[string]string{}
 	nodeIdx := map[string]*MapNode{}
 	for i := range nodes {
 		n := &nodes[i]
-		name, src := poolOf(n.Labels)
-		p := pools[name]
+		name, src, sel := poolLabel(n.Labels)
+		p := bySource[poolKey{name, src}]
 		if p == nil {
-			p = &MapPool{Name: name, Source: src}
-			pools[name] = p
+			// Two pools may share a name across sources (an AKS agent pool and a Karpenter
+			// NodePool both called "default"): they stay two pools, the later one says whose it is.
+			shown := name
+			if pools[shown] != nil {
+				shown = name + " (" + src + ")"
+			}
+			p = &MapPool{Name: shown, Source: src, Selector: sel}
+			pools[shown], bySource[poolKey{name, src}] = p, p
 		}
 		if c := n.Labels["cloud.google.com/compute-class"]; c != "" {
 			p.Class = c
@@ -210,7 +226,7 @@ func (c *Cluster) ClusterMap(ctx context.Context) (*ClusterMap, error) {
 		p.CPUAlloc += n.Status.Allocatable.Cpu().MilliValue()
 		p.MemAlloc += n.Status.Allocatable.Memory().Value()
 		p.Nodes = append(p.Nodes, mn)
-		nodePool[n.Name] = name
+		nodePool[n.Name] = p.Name
 	}
 	for _, p := range pools {
 		sort.Slice(p.Nodes, func(i, j int) bool { return p.Nodes[i].Name < p.Nodes[j].Name })
