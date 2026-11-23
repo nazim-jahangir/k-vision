@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -343,6 +344,21 @@ func (m *Model) tableView(h int) string {
 	for _, w := range widths {
 		total += w + 2
 	}
+	// On nodes, CLASS and SPOT are extras: when the table is too wide they go, CLASS
+	// first, before any other column is cut.
+	isNodes := m.kind.ID() == "nodes"
+	for _, extra := range []string{"CLASS", "SPOT"} {
+		i := slices.Index(cols, extra)
+		if !isNodes || total <= m.width || i < 0 {
+			continue
+		}
+		total -= widths[i] + 2
+		cols, widths = without(cols, i), without(widths, i)
+		for j := range cells {
+			cells[j] = without(cells[j], i)
+		}
+	}
+	nameAt := slices.Index(cols, "NAME")
 	for total > m.width && total > 0 {
 		wi := 0
 		for i := range widths {
@@ -361,6 +377,15 @@ func (m *Model) tableView(h int) string {
 	for i, line := range cells {
 		r := m.rows[m.visible[m.offset+i]]
 		_, isMarked := m.marked[markKey(r)]
+		// A node's name ends in what tells it from its neighbours (the pool comes
+		// first on GKE and AKS), so a name that does not fit is cut in the middle.
+		if isNodes && nameAt >= 0 {
+			w := widths[nameAt]
+			if isMarked && nameAt == 0 {
+				w -= 2
+			}
+			line[nameAt] = truncateMiddle(line[nameAt], w)
+		}
 		if isMarked {
 			line[0] = stCmd.Render("✓ ") + line[0]
 		}
@@ -461,6 +486,27 @@ func pad(cells []string, widths []int) string {
 		}
 	}
 	return b.String()
+}
+
+// without returns a copy of s with element i left out.
+func without[T any](s []T, i int) []T {
+	out := make([]T, 0, len(s)-1)
+	return append(append(out, s[:i]...), s[i+1:]...)
+}
+
+// truncateMiddle shortens plain ASCII text (a node name) to w cells keeping both
+// ends: "gke-prod-…a1b2c3d4-x9zq".
+func truncateMiddle(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w < 5 {
+		return truncate(s, w)
+	}
+	head := (w - 1) / 2
+	tail := w - 1 - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
 
 func padTo(s string, w int) string {

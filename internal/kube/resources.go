@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -98,9 +99,28 @@ func (c *Cluster) ResolveKind(name string) (Kind, error) {
 		}
 	}
 	if best == nil {
-		return Kind{}, fmt.Errorf("unknown resource type %q", name)
+		return Kind{}, fmt.Errorf("%w %q", ErrUnknownKind, name)
 	}
 	return *best, nil
+}
+
+// ErrUnknownKind is ResolveKind's error for a name the cluster serves no resource type for.
+var ErrUnknownKind = errors.New("unknown resource type")
+
+// dropIfEmpty removes a column no row has a value for.
+func dropIfEmpty(cols []string, rows []Row, col string) []string {
+	for _, r := range rows {
+		if r.Cells[col] != "" {
+			return cols
+		}
+	}
+	out := make([]string, 0, len(cols))
+	for _, c := range cols {
+		if c != col {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // Row is one object as a table row: the generic columns plus whatever the kind adds.
@@ -203,6 +223,9 @@ func (c *Cluster) list(ctx context.Context, k Kind, namespace string) ([]Row, []
 	rows := make([]Row, 0, len(list.Items))
 	for i := range list.Items {
 		rows = append(rows, toRow(k, &list.Items[i]))
+	}
+	if k.ID() == "nodes" {
+		cols = dropIfEmpty(cols, rows, "CLASS") // ComputeClass is GKE only
 	}
 	// A custom resource with no columns of ours: show the ones its CRD declares
 	// (additionalPrinterColumns), like kubectl get and Lens.

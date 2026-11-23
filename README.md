@@ -92,7 +92,8 @@ uninstalling and building from source.
 **See how it fits together**
 
 - **Topology**, three ways:
-  - **Cluster** — node pools and their nodes, and which namespaces run on which pool.
+  - **Cluster** — node pools and their nodes, and which namespaces run on which pool. Pools are
+    recognised on Karpenter, EKS, GKE (including NAP) and AKS.
   - **Namespace** — the path from Ingress → Service → workload → ConfigMaps and Secrets, with anything broken
     or missing in red.
   - **Helm** — which release created what, and whether all of it is still there and healthy.

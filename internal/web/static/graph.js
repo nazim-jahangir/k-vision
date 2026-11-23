@@ -380,7 +380,7 @@
       const g = sv("g", { class: `rm-node h-${p.health || "none"}`, transform: `translate(${x0},${y})`, tabindex: 0, role: "button",
         "aria-label": `Node pool ${p.name}, ${p.nodes.length} nodes, CPU ${cpu}% requested` });
       g.append(sv("rect", { width: PW, height: h, rx: 10, class: "rm-card" }), sv("rect", { width: 4, height: h - 12, x: 0, y: 6, rx: 2, class: "rm-stripe" }));
-      g.append(txt(14, 18, p.source === "karpenter" ? "KARPENTER NODEPOOL" : p.source === "eks" ? "NODE GROUP" : "NODES", "rm-kind"));
+      g.append(txt(14, 18, ({ karpenter: "KARPENTER NODEPOOL", eks: "NODE GROUP", gke: "GKE NODE POOL", "gke-nap": "GKE NAP POOL", aks: "AKS AGENT POOL" }[p.source] || "NODES") + (p.class ? " · " + clip(p.class, 18) : ""), "rm-kind"));
       g.append(txt(PW - 12, 18, `${p.nodes.length} node${p.nodes.length === 1 ? "" : "s"} · ${p.pods} pods`, "rm-status", { "text-anchor": "end" }));
       g.append(txt(14, 38, clip(p.name, 34), "rm-name"));
       // capacity bars

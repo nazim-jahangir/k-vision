@@ -332,7 +332,10 @@ func clusterTopologyText(cm *kube.ClusterMap, system bool) string {
 		stOK.Render("■") + stDim.Render(" <60% CPU requested  ") + stWarn.Render("■") + stDim.Render(" 60–90%  ") +
 		stBad.Render("■") + stDim.Render(" ≥90% / not ready   ◇ spot") + "\n")
 	for _, p := range cm.Pools {
-		src := map[string]string{"karpenter": "karpenter", "eks": "node group"}[p.Source]
+		src := map[string]string{"karpenter": "karpenter", "eks": "node group", "gke": "GKE node pool", "gke-nap": "GKE NAP", "aks": "AKS agent pool"}[p.Source]
+		if p.Class != "" {
+			src += " · class " + p.Class
+		}
 		fmt.Fprintf(&b, "\n %s %s %s\n", healthDot(p.Health), stKey.Render(p.Name), stDim.Render(strings.TrimSuffix(fmt.Sprintf("%s · %d node%s · %d pods · %s", orDash(src), len(p.Nodes), plural(len(p.Nodes)), p.Pods, strings.Join(p.Types, ", ")), " · ")))
 		fmt.Fprintf(&b, "   CPU    %s %3d%%  %s\n", bar(pct(p.CPUReq, p.CPUAlloc), 24), pct(p.CPUReq, p.CPUAlloc), stDim.Render(fmt.Sprintf("%.1f / %.1f cores", float64(p.CPUReq)/1000, float64(p.CPUAlloc)/1000)))
 		fmt.Fprintf(&b, "   Memory %s %3d%%  %s\n", bar(pct(p.MemReq, p.MemAlloc), 24), pct(p.MemReq, p.MemAlloc), stDim.Render(gib(p.MemReq)+" / "+gib(p.MemAlloc)+" GiB"))

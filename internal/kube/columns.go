@@ -22,7 +22,7 @@ func columnsFor(k Kind) []string {
 	case "replicasets.apps":
 		return []string{"DESIRED", "READY"}
 	case "nodes":
-		return []string{"ROLES", "VERSION", "INSTANCE", "ZONE", "NODEPOOL"}
+		return []string{"ROLES", "VERSION", "INSTANCE", "ZONE", "NODEPOOL", "CLASS", "SPOT"}
 	case "services":
 		return []string{"TYPE", "CLUSTER-IP", "EXTERNAL", "PORTS"}
 	case "ingresses.networking.k8s.io":
@@ -360,7 +360,15 @@ func nodeRow(r *Row, o map[string]any) {
 	r.Cells["VERSION"] = str(o, "status", "nodeInfo", "kubeletVersion")
 	r.Cells["INSTANCE"] = r.Labels["node.kubernetes.io/instance-type"]
 	r.Cells["ZONE"] = r.Labels["topology.kubernetes.io/zone"]
-	r.Cells["NODEPOOL"] = r.Labels["karpenter.sh/nodepool"]
+	if p, src := poolOf(r.Labels); src != "" {
+		r.Cells["NODEPOOL"] = p
+	}
+	if c := r.Labels["cloud.google.com/compute-class"]; c != "" {
+		r.Cells["CLASS"] = c
+	}
+	if isSpot(r.Labels) {
+		r.Cells["SPOT"] = "spot"
+	}
 	r.Status, r.Health = "NotReady", Failing
 	if conditionStatus(o, "Ready") == "True" {
 		r.Status, r.Health = "Ready", Healthy
